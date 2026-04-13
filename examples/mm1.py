@@ -1,8 +1,15 @@
 """
 M/M/1 example built on des_library.
 
-This is the modernized version of the original `Code/MM1.py`,
-implemented with encapsulated model state (no globals).
+Structure:
+- `MM1Model` owns parameters, simulation state, and statistics collectors.
+- `Arrival` and `EndService` events encode all system dynamics.
+- `run()` sets the initial event and delegates progression to the DES engine.
+
+Why this design:
+- Keeps model state centralized and explicit, so event logic stays easy to reason about.
+- Separates concerns between domain behavior (events) and infrastructure (simulation engine).
+- Makes the example reusable as a template for queueing models with different policies.
 """
 
 from __future__ import annotations

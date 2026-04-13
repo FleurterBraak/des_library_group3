@@ -1,7 +1,16 @@
 """
 M/G/1 Processor Sharing example built on des_library.
 
-This is the modernized version of the original `Code/MG1PS.py`.
+Structure:
+- `MG1PSModel` owns the queue, timing state, event handles, and statistics.
+- `Customer` stores per-job remaining service and arrival timestamp.
+- `Arrival` and `EndService` events maintain processor-sharing dynamics by
+  updating all remaining times and rescheduling completions when needed.
+
+Why this design:
+- Encapsulates all mutable state in one model object, which avoids hidden coupling.
+- Keeps event handlers focused on state transitions tied to simulation time.
+- Demonstrates cancellation/rescheduling patterns needed in preemptive DES models.
 """
 
 from __future__ import annotations
