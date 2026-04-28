@@ -60,7 +60,7 @@ class Arrival(Event):
             reneging_time = sim.current_time + ev.patience #determine reneging moment
             ev.reneging_event = sim.schedule(Reneging(reneging_time, ev, m)) #schedule reneging
 
-            if len(m.queue) % 5 == 0: #check if queue is multiple of 5
+            if len(m.queue) % 5 == 0 and len(m.queue) != 0: #check if queue is multiple of 5
                trigger_early_departure(sim, m) #check the early departure
 
 class ServiceEndEvent(Event):
@@ -136,24 +136,25 @@ def time_update(sim, event):
     m.area_busy += m.busy * dt #number of busy chargeer in between two decision moements times this time
 
 #running simulation
-sim = Simulation()
-model = EVChargingModel()
+if __name__ == '__main__':
+    sim = Simulation()
+    model = EVChargingModel()
 
-sim.model = model
-sim.on_before_event(time_update)
+    sim.model = model
+    sim.on_before_event(time_update)
 
-sim.schedule(Arrival(0.0, 1, model))
-sim.run()
-T = sim.current_time
+    sim.schedule(Arrival(0.0, 1, model))
+    sim.run()
+    T = sim.current_time
 
-average_queue = model.area_queue / T
-average_wait = model.total_waiting_time / (model.completed)
-reneging_fraction = model.reneged / model.arrivals
-utilisation = model.area_busy / (model.chargers * T)
-early_departure_fraction = model.early_departure / model.completed
+    average_queue = model.area_queue / T
+    average_wait = model.total_waiting_time / (model.completed)
+    reneging_fraction = model.reneged / model.arrivals
+    utilisation = model.area_busy / (model.chargers * T)
+    early_departure_fraction = model.early_departure / model.completed
 
-print("Average queue length:", average_queue)
-print("Average waiting time:", average_wait)
-print("Reneging fraction:", reneging_fraction)
-print("Utilisation:", utilisation)
-print("Early departure fraction:", early_departure_fraction)
+    print("Average queue length:", average_queue)
+    print("Average waiting time:", average_wait)
+    print("Reneging fraction:", reneging_fraction)
+    print("Utilisation:", utilisation)
+    print("Early departure fraction:", early_departure_fraction)
