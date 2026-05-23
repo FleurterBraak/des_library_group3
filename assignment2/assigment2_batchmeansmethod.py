@@ -15,7 +15,7 @@ class CityWasteModel:
         self.q1 = 1/3   #waste probabilities
         self.q2 = 1/3
         self.q3 = 1 - self.q1 - self.q2
-        self.k1 = 2 #parameters for service districution
+        self.k1 = 2 #parameters for service distribution
         self.k2 = 3
         self.mu1 = 1.0
         self.mu2 = 1.5
@@ -46,11 +46,11 @@ class CityWasteModel:
         self.completed = 0  #number of completed request
         self.reroutings = 0 #number of reroutings
 
-        self.warmup_time = 5000 #set warmup length todo: decide how long it should be (met die delta ofzo)
-        self.batch_length = 2000    #set batch length   todo: decide how long
-        self.number_batches = 30    #set number of batches  todo: how many
+        self.warmup_customers = 0 #set warmup customers
+        self.number_batches = 50    #set number of batches
         self.current_batch = 0  #tracker of at which batch we are
-        self.batch_start_time = self.warmup_time    #set the start time of batches to the end of the warmup time
+        self.batch_start_time = None    #set the start time of batches to none since we don't want batches in the warm-up
+        self.warmup_end_time = None #set the endtime of the warmup to None
 
         self.batch_waiting = [0.0]*N    #current batch waiting times
         self.batch_completed = [0]*N    #current number of completed request of this batch
@@ -66,7 +66,7 @@ class CityWasteModel:
         dt = sim.current_time - self.last_event_time    #time interval between two events
         self.last_event_time = sim.current_time #update last event time
 
-        if sim.current_time < self.warmup_time:
+        if self.completed < self.warmup_customers:  #check if we are still in warmup
             return
 
         for district in range(self.N):  #compute queue lengths
@@ -122,12 +122,19 @@ class CityWasteModel:
 
         service_time = self.sample_service_time(request["type"]) #get service time
         completion_time = sim.current_time + service_time   #determine completin time
-        event = ServiceCompletion(completion_time, truck_id, district, model)   #create completion event
+        event = ServiceCompletion(completion_time, truck_id, district, self)   #create completion event
         truck["completion_event"] = event   #add completion event to truck
 
         sim.schedule(event) #schedule completion
 
     def batch_end(self, sim):
+        if self.warmup_end_time is None:    #check if the warmup time is still None
+            if self.completed >= self.warmup_customers: #if the warmuptime is over
+                self.batch_start_time = sim.current_time    #set the start time of the batch
+                self.warmup_end_time = sim.current_time #set the end of the warumup time
+            else:
+                return
+
         if sim.current_time >= self.batch_start_time + self.batch_length:   #if end of batch reached
             self.batch_waiting_hist.append(self.batch_waiting.copy())   #put all variables in history list
             self.batch_completed_hist.append(self.batch_completed.copy())
@@ -153,7 +160,7 @@ class Arrival(Event):
         model.update_time_stats(sim)
 
         #Add request to queue
-        waste_type = random.choices([1,2,3], weights = [model.q1, model.q2, model.q3])[0]   #initilize wate type
+        waste_type = random.choices([1,2,3], weights = [model.q1, model.q2, model.q3])[0]   #initilize waste type
         request = {                                 #initialize request
             "arrival_time": sim.current_time,
             "type": waste_type,
@@ -194,7 +201,7 @@ class ServiceCompletion(Event):
 
         waiting_time = sim.current_time - request["arrival_time"]   #determine the total waiting time
         model.total_waiting_time[request["district"]] += waiting_time   #add waiting time to list of waiting times per district
-        if sim.current_time >= model.warmup_time:
+        if model.completed >= model.warmup_customers:
             model.batch_waiting[request["district"]] += waiting_time
             model.batch_completed[request["district"]] += 1
         model.completed +=1 #increase general completed counter todo: moet dit hier wel staan?
@@ -230,7 +237,7 @@ class Reroute(Event):
         truck["completion_event"] = None    #remove completion event
 
         #Increase counter
-        if sim.current_time >= model.warmup_time:
+        if model.completed >= model.warmup_customers:
             model.reroutings +=1    #increase number of reroutings
 
         #start with the service at home
@@ -245,13 +252,70 @@ def confidence_interval(batch_values):  #determine the CI
     half_width = t_value * std / np.sqrt(n) #determine half width
     lower = mean - half_width  # determine lower ci
     upper = mean + half_width  # determine upper ci
-    relative_precision = half_width / mean  #todo: iets doen met deze check moet onder 0.10 zijn
-    print(relative_precision)
     return mean, lower, upper
 
+def determine_warmup(N_W, K_W, epsilon):
+    runs = []   #make a list to store the runs
+    for n in range(N_W):    #for N_W simulation runs (small number) run the simulation
+        sim = Simulation()
+        model = CityWasteModel()
+        waiting_times = []  #store waiting times
+
+        old_execute = ServiceCompletion.execute #save original function but for now we replace it with new_execute
+
+        def new_execute(self, sim): #replacement function so that we dont update statistics
+            model = self.model  #define model
+            model.update_time_stats(sim)
+            truck = model.trucks[self.truck_id] #get truck
+            request = truck["current_request"]  #get request
+            waiting_time = sim.current_time - request["arrival_time"]   #calculte waiting time
+            waiting_times.append(waiting_time)  #add waiting time to list
+            model.total_waiting_time[request["district"]] += waiting_time   #add waiting time to the total time
+            model.completed +=1 #increase completed counter
+
+            truck["status"] = "idle"    #set truck status to idle
+            truck["current_request"] = None #set current request to none
+            truck["completion_event"] = None    #remoce completion event
+
+            model.truck_decision(self.truck_id, sim)
+
+        ServiceCompletion.execute = new_execute #replace service completion with new_execte
+
+        for district in range(model.N): #for all district schedule an arrival at the start
+            sim.schedule(Arrival(0.0, district, model))
+
+        sim.run(lambda s: model.completed >= K_W)   #stop after K_W completed requests
+        runs.append(waiting_times[:K_W])    #sore the waiting times in the list
+        ServiceCompletion.execute = old_execute #set original function back
+
+    W = np.array(runs)  #create a matrix of the runs
+    W_bar_k = np.mean(W, axis=0)    #point estimator for the expected waiting time of the k-th run
+    for D in range(100, K_W//2):    #find a D such that it is at least 100 and 2D<K_W
+        mean_D = np.mean(W_bar_k[:D])   #calculate mean with D (slides)
+        mean_2D = np.mean(W_bar_k[:2*D])    #calculate mean with 2D (slides)
+        ratio = abs(mean_2D / mean_D - 1)   #get the absolute reatio
+        if ratio <= epsilon:    #check whether it is smaller then the tollerence
+            return D    #then return D
+    return K_W  #in case the criterion is not met at all just choose the K_W
+
+def check_precision(mean, lower, upper, delta=0.05):
+    h = (upper - lower) / 2 #get the halfwidth of the CI
+    if mean == 0:   #mean should not be zero
+        return False
+    relative_precision = h / mean   #compute relative percision
+    output = (relative_precision <= delta)  #check whether that forfills the condition
+    return output, relative_precision
+
 if __name__ == "__main__":
+    print("Deteming warm-up period:")
+    warmup_customers = determine_warmup(N_W=1, K_W=20000, epsilon=0.05)
+    print("Estimated warm-up:", warmup_customers)
+
     sim = Simulation()
     model = CityWasteModel()
+
+    model.warmup_customers = warmup_customers
+    model.batch_length = 4 * warmup_customers   #determine batch length with rule of thumb
 
     for district in range(model.N):
         sim.schedule(Arrival(0.0, district, model))
@@ -270,7 +334,13 @@ if __name__ == "__main__":
                 total_wait = model.batch_waiting_hist[batch][district]
                 batch_estimates.append(total_wait / completed)
         theta, lower, upper = confidence_interval(batch_estimates)
+        is_precise, relative_precision = check_precision(theta, lower, upper)
         print(f"District {district}: " f"{theta:.4f} " f"(95% CI: [{lower:.4f}, {upper:.4f}])")
+        print(f"Relative precision: {relative_precision:.4f}")
+        if is_precise:
+            print("Condition holds")
+        else:
+            print("Condition does not hold")
 
     # Queue length per district
     print("\n=== Expected Steady-State Queue Length ===")
@@ -281,7 +351,13 @@ if __name__ == "__main__":
             area = model.batch_queue_hist[batch][district]
             batch_estimates.append(area / model.batch_length)
         theta, lower, upper = confidence_interval(batch_estimates)
+        is_precise, relative_precision = check_precision(theta, lower, upper)
         print(f"District {district}: " f"{theta:.4f} " f"(95% CI: [{lower:.4f}, {upper:.4f}])")
+        print(f"Relative precision: {relative_precision:.4f}")
+        if is_precise:
+            print("Condition holds")
+        else:
+            print("Condition does not hold")
 
     # Utilisation per truck
     print("\n=== Truck utilisation per truck ===")
@@ -291,6 +367,12 @@ if __name__ == "__main__":
             busy = model.batch_busy_hist[batch][truck]
             batch_estimates.append(busy / model.batch_length)
         theta, lower, upper = confidence_interval(batch_estimates)
+        is_precise, relative_precision = check_precision(theta, lower, upper)
         print(f"Truck {truck}: " f"{theta:.4f} " f"(95% CI: [{lower:.4f}, {upper:.4f}])")
+        print(f"Relative precision: {relative_precision:.4f}")
+        if is_precise:
+            print("Condition holds")
+        else:
+            print("Condition does not hold")
 
-    print("Rerouting rate:", model.reroutings / (sim.current_time - model.warmup_time))
+    print("\nRerouting rate:", model.reroutings / (sim.current_time - model.warmup_end_time))

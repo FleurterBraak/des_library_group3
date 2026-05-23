@@ -4,7 +4,7 @@ import numpy as np
 from scipy.stats import t
 
 class CityWasteModel:
-    def __init__(self, N = 3, M = 3, K = 5, p = 0.5):
+    def __init__(self, N = 3, M = 3, K = 5, p = 0.51):
         self.N = N  #numbers of districts
         self.M = M  #number of trucks
         self.K = K  #Rerouting value
@@ -15,7 +15,7 @@ class CityWasteModel:
         self.q1 = 1/3   #waste probabilities
         self.q2 = 1/3
         self.q3 = 1 - self.q1 - self.q2
-        self.k1 = 2 #parameters for service districution
+        self.k1 = 2 #parameters for service distribution
         self.k2 = 3
         self.mu1 = 1.0
         self.mu2 = 1.5
@@ -273,7 +273,7 @@ if __name__ == "__main__":
 
     sim.on_after_event(lambda s, e: model.check_regeneration(s))
 
-    sim.run(lambda s: len(model.cycle_time) >= 200) #todo: bedenk ff hoe dat zit met iteraties
+    sim.run(lambda s: len(model.cycle_time) >= 10000) #todo: bedenk ff hoe dat zit met iteraties
 
     print("\n=== Expected Steady-State Waiting Time ===")
     for district in range(model.N):
